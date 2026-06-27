@@ -78,21 +78,70 @@ function playSoundSwipe(value, max) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-//  ENCODING — base64url (no server needed for config in URL)
+//  ENCODING — deflate-raw compression + base64url
+//  Uses browser-native CompressionStream (no library needed).
+//  Compressed URLs are ~60–70% shorter than plain base64.
 // ══════════════════════════════════════════════════════════════════
 
-function encodeConfig(config) {
-  const bytes = new TextEncoder().encode(JSON.stringify(config));
+const SUPPORTS_COMPRESSION = typeof CompressionStream !== 'undefined';
+
+/** Strip fields not needed by the player to minimize URL size */
+function slimConfig(config) {
+  return {
+    v: config.v,
+    title: config.title,
+    formId: config.formId,
+    submitUrl: config.submitUrl,
+    questions: config.questions.map(q => {
+      const out = { id: q.id, title: q.title, kind: q.kind };
+      if (q.max != null)        out.max = q.max;
+      if (q.options?.length)    out.options = q.options;
+      if (q.scaleLabels)        out.scaleLabels = q.scaleLabels;
+      if (q.required === true)  out.required = true;  // omit false to save bytes
+      return out;
+    }),
+  };
+}
+
+async function encodeConfig(config) {
+  const json = JSON.stringify(slimConfig(config));
+  if (SUPPORTS_COMPRESSION) {
+    // Compress with deflate-raw, prefix result with 'z' to mark format
+    const stream = new CompressionStream('deflate-raw');
+    const writer = stream.writable.getWriter();
+    writer.write(new TextEncoder().encode(json));
+    writer.close();
+    const buf  = await new Response(stream.readable).arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    bytes.forEach(b => (binary += String.fromCharCode(b)));
+    return 'z' + btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+  // Fallback: plain base64 (no compression support)
+  const bytes = new TextEncoder().encode(json);
   let binary = '';
   bytes.forEach(b => (binary += String.fromCharCode(b)));
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function decodeConfig(encoded) {
-  const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-  const pad = base64.length % 4 ? '='.repeat(4 - (base64.length % 4)) : '';
-  const binary = atob(base64 + pad);
-  const bytes = new Uint8Array([...binary].map(ch => ch.charCodeAt(0)));
+async function decodeConfig(encoded) {
+  if (encoded.startsWith('z') && SUPPORTS_COMPRESSION) {
+    // Compressed format
+    const b64    = encoded.slice(1).replace(/-/g, '+').replace(/_/g, '/');
+    const pad    = b64.length % 4 ? '='.repeat(4 - b64.length % 4) : '';
+    const binary = atob(b64 + pad);
+    const bytes  = new Uint8Array([...binary].map(c => c.charCodeAt(0)));
+    const stream = new DecompressionStream('deflate-raw');
+    const writer = stream.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    return JSON.parse(await new Response(stream.readable).text());
+  }
+  // Plain base64 (old links or no compression support)
+  const b64    = encoded.replace(/-/g, '+').replace(/_/g, '/');
+  const pad    = b64.length % 4 ? '='.repeat(4 - b64.length % 4) : '';
+  const binary = atob(b64 + pad);
+  const bytes  = new Uint8Array([...binary].map(c => c.charCodeAt(0)));
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
@@ -246,8 +295,9 @@ async function convert() {
       questions: data.questions,
     };
     // Update URL to edit hash so page reload preserves state
-    history.replaceState(null, '', `${location.pathname}#edit=${encodeConfig(config)}`);
-    showResult(config);
+    const encoded = await encodeConfig(config);
+    history.replaceState(null, '', `${location.pathname}#edit=${encoded}`);
+    await showResult(config);
   } catch (err) {
     // Translate generic network error into user-friendly message
     if (err.message === 'Failed to fetch') {
@@ -265,8 +315,8 @@ async function convert() {
 //  RESULT PAGE (admin view)
 // ══════════════════════════════════════════════════════════════════
 
-function showResult(config) {
-  const encoded = encodeConfig(config);
+async function showResult(config) {
+  const encoded = await encodeConfig(config);
   const base = `${location.origin}${location.pathname}`;
   const respondentUrl = `${base}#play=${encoded}`;  // for form fillers
   const editUrl = `${base}#edit=${encoded}`;         // for admin to come back
@@ -706,19 +756,21 @@ function player(config) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-//  ROUTER — read URL hash to decide which view to show
+//  ROUTER — async IIFE so we can await decodeConfig
 // ══════════════════════════════════════════════════════════════════
 
-try {
-  const { play, edit } = getHashParams();
-  if (play) {
-    player(decodeConfig(play));           // Respondent link → swipe player
-  } else if (edit) {
-    showResult(decodeConfig(edit));       // Admin link → result/manage page
-  } else {
-    landing();                            // No hash → landing page
+(async () => {
+  try {
+    const { play, edit } = getHashParams();
+    if (play) {
+      player(await decodeConfig(play));          // Respondent link → swipe player
+    } else if (edit) {
+      await showResult(await decodeConfig(edit)); // Admin link → result/manage page
+    } else {
+      landing();                                  // No hash → landing page
+    }
+  } catch (_) {
+    // Corrupt hash or decoding error — fall back to landing
+    landing();
   }
-} catch (_) {
-  // Corrupt hash or decoding error — fall back to landing
-  landing();
-}
+})();
