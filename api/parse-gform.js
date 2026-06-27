@@ -150,7 +150,11 @@ export default async function handler(req, res) {
 
     const html = await response.text();
 
-    if (!response.ok || /Sign in|Masuk|accounts\.google\.com/i.test(html)) {
+    // Only check if truly redirected to login page.
+    // NOTE: We do NOT scan html for "Sign in" — that text appears on ALL Google
+    // pages (in the navbar) and would cause false positives on public forms.
+    const redirectedToLogin = response.url.includes('accounts.google.com');
+    if (!response.ok || redirectedToLogin) {
       return res.status(422).json({
         error: 'Form ini tidak publik atau wajib login Google. Buka Google Form → Settings → ubah akses ke "Anyone with the link".',
       });
