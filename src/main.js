@@ -34,10 +34,34 @@ function playTone(freq = 520, duration = 0.12, type = 'sine', volume = 0.15) {
   } catch (_) { /* silent fail — audio not critical */ }
 }
 
-/** Two-note ascending ding when moving to next question */
+/** Bell "cling!" when finishing a question — fundamental + harmonics with long decay */
 function playSoundNext() {
-  playTone(440, 0.09, 'sine', 0.14);
-  setTimeout(() => playTone(660, 0.13, 'sine', 0.12), 90);
+  try {
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+
+    // Bell harmonics: fundamental C6 (1047 Hz) + overtones
+    // Each partial decays at different rate, giving a rich bell timbre
+    const partials = [
+      { freq: 1046.5, gain: 0.28, decay: 0.70 },  // fundamental
+      { freq: 2093.0, gain: 0.14, decay: 0.50 },  // 2nd harmonic
+      { freq: 3136.0, gain: 0.07, decay: 0.35 },  // 3rd harmonic
+      { freq: 4186.0, gain: 0.04, decay: 0.22 },  // 4th harmonic
+    ];
+
+    partials.forEach(({ freq, gain, decay }) => {
+      const osc  = ctx.createOscillator();
+      const gn   = ctx.createGain();
+      osc.connect(gn);
+      gn.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gn.gain.setValueAtTime(gain, ctx.currentTime);
+      gn.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + decay);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + decay + 0.02);
+    });
+  } catch (_) { /* silent fail */ }
 }
 
 /** Celebratory ascending chord on final submit */
@@ -372,7 +396,7 @@ function player(config) {
           </div>
           <div class="story-bars">${storyBars}</div>
 
-          ${isScale ? scalePanel(max) : ''}
+          ${isScale ? scalePanel(max, q.scaleLabels) : ''}
 
           <p class="hint">
             ${isScale
@@ -422,18 +446,40 @@ function player(config) {
   }
 
   // ── Scale panel (top of phone) ────────────────────────────────────
-  function scalePanel(max) {
-    const boxes = Array.from({ length: max }, (_, i) =>
-      `<div class="scale-box ${i + 1 === currentValue ? 'active' : ''}">${i + 1}</div>`
-    ).join('');
+  function scalePanel(max, scaleLabels) {
+    // For Likert scales (all values have labels), show short label in each box
+    const hasAllLabels = scaleLabels &&
+      Array.from({ length: max }, (_, i) => i + 1).every(v => scaleLabels[v]);
+
+    const boxes = Array.from({ length: max }, (_, i) => {
+      const val = i + 1;
+      const isActive = val === currentValue;
+      let display;
+      if (hasAllLabels) {
+        // Show first 2 chars of label as abbreviation (e.g. "SS", "S", "N", "TS", "STS")
+        const label = scaleLabels[val] || String(val);
+        // Build initials: take first letter of each word, max 3 chars
+        const initials = label.split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase();
+        display = initials || String(val);
+      } else {
+        display = String(val);
+      }
+      return `<div class="scale-box ${isActive ? 'active' : ''}">${display}</div>`;
+    }).join('');
+
+    // Legend: use actual labels if available, otherwise generic
+    const lowLabel  = scaleLabels?.[1]   || 'Rendah';
+    const highLabel = scaleLabels?.[max] || 'Tinggi';
+
     return `
       <div class="scale-panel">
         <div class="scale-row" id="scaleBoxes" style="grid-template-columns:repeat(${max},1fr)">
           ${boxes}
         </div>
-        <div class="scale-legend"><span>Rendah</span><span>Tinggi</span></div>
+        <div class="scale-legend"><span>${escapeHtml(lowLabel)}</span><span>${escapeHtml(highLabel)}</span></div>
       </div>`;
   }
+
 
   // ── Answer input renderer ─────────────────────────────────────────
   function answerControl(q) {

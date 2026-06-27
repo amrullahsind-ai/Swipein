@@ -21,6 +21,76 @@ function safeTitle(data) {
   return candidates[0] || 'SwipeForm';
 }
 
+// ── Likert scale auto-detection ───────────────────────────────────────────────
+//
+// Multiple-choice questions that follow a Likert pattern (e.g. "Sangat Setuju"
+// through "Sangat Tidak Setuju") are detected here and converted to swipeable
+// scale cards instead of click-based radio lists.
+
+const LIKERT_POSITIVE = [
+  /^sangat\s+(?!tidak)/i,   // "Sangat Sesuai", "Sangat Setuju", "Sangat Puas"...
+  /^strongly\s+(?!dis)/i,   // "Strongly agree"
+  /^selalu$/i,              // "Selalu" (Always)
+  /^always$/i,
+];
+
+const LIKERT_NEGATIVE = [
+  /sangat\s+tidak/i,        // "Sangat Tidak Sesuai"
+  /strongly\s+dis/i,        // "Strongly disagree"
+  /tidak\s+pernah/i,        // "Tidak Pernah"
+  /never/i,
+];
+
+/**
+ * Returns { ascending: boolean } if options look like a Likert scale, else null.
+ * ascending = true  → value 1 = options[0] (low positive)
+ * ascending = false → value 1 = options[last] (high negative), value max = options[0]
+ */
+function detectLikertScale(opts) {
+  if (!opts?.length || opts.length < 3 || opts.length > 7) return null;
+
+  // Pure numeric options ("1","2","3") only if range ≤ 10 starting from 1
+  const nums = opts.map(o => Number(o.trim())).filter(n => Number.isFinite(n) && n > 0);
+  if (nums.length === opts.length) {
+    const sorted = [...nums].sort((a, b) => a - b);
+    if (sorted[0] === 1 && sorted[sorted.length - 1] <= 10) {
+      return { ascending: true };
+    }
+    return null; // numbers like 16,17,18... stay as regular choice
+  }
+
+  const firstOpt = opts[0].trim();
+  const lastOpt  = opts[opts.length - 1].trim();
+
+  const firstIsPositive = LIKERT_POSITIVE.some(p => p.test(firstOpt));
+  const lastIsNegative  = LIKERT_NEGATIVE.some(p => p.test(lastOpt));
+  const firstIsNegative = LIKERT_NEGATIVE.some(p => p.test(firstOpt));
+  const lastIsPositive  = LIKERT_POSITIVE.some(p => p.test(lastOpt));
+
+  // "Sangat Setuju" → ... → "Sangat Tidak Setuju" (descending: first=highest)
+  if (firstIsPositive && lastIsNegative) return { ascending: false };
+  // "Sangat Tidak Setuju" → ... → "Sangat Setuju" (ascending: first=lowest)
+  if (firstIsNegative && lastIsPositive) return { ascending: true };
+
+  // Fallback: any option contains "sangat" + at least one contains "tidak"
+  const allText = opts.join(' ').toLowerCase();
+  const hasSangat = /sangat/.test(allText);
+  const hasTidak  = /tidak|never|dis/.test(allText);
+  if (hasSangat && hasTidak) {
+    return { ascending: !firstIsPositive };
+  }
+
+  // Frequency scale: Selalu / Sering / Kadang-kadang / Jarang / Tidak Pernah
+  const freqWords = /selalu|sering|kadang|jarang|tidak pernah|always|often|sometimes|rarely|never/i;
+  const freqMatches = opts.filter(o => freqWords.test(o));
+  if (freqMatches.length >= Math.ceil(opts.length * 0.6)) {
+    const firstIsAlways = /selalu|always/i.test(firstOpt);
+    return { ascending: !firstIsAlways }; // "Selalu" = highest positive
+  }
+
+  return null;
+}
+
 // ── Question normalizer ────────────────────────────────────────────────────────
 
 function normalizeQuestion(item) {
@@ -54,10 +124,25 @@ function normalizeQuestion(item) {
     kind = 'text';
 
   } else if (type === 2 || type === 3) {
-    kind = 'choice';
-    options = rawOptions
+    const rawOpts = rawOptions
       .map(o => Array.isArray(o) ? o[0] : o)
       .filter(v => typeof v === 'string' && v.trim());
+
+    const likert = detectLikertScale(rawOpts);
+    if (likert) {
+      // Convert Likert multiple-choice → swipeable scale
+      kind = 'scale';
+      max  = rawOpts.length;
+      scaleLabels = {};
+      rawOpts.forEach((opt, i) => {
+        // ascending=false → first option maps to highest value (e.g. "Sangat Setuju" = 5)
+        const val = likert.ascending ? i + 1 : max - i;
+        scaleLabels[val] = opt;
+      });
+    } else {
+      kind    = 'choice';
+      options = rawOpts;
+    }
 
   } else if (type === 4) {
     // BUG FIX: Checkbox must be its own kind — not the same as radio 'choice'

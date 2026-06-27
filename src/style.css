@@ -457,11 +457,13 @@ textarea { resize: vertical; }
   display: grid;
   place-items: center;
   position: relative;
+  overflow: hidden;        /* prevent card from bleeding over action buttons */
+  padding-bottom: 4px;
 }
 
 .card {
   width: min(320px, 86%);
-  min-height: 330px;
+  min-height: 200px;       /* reduced — avoids forcing overflow on short decks */
   background: var(--card);
   border: 1px solid rgba(234, 223, 212, .98);
   border-radius: 30px;
@@ -480,7 +482,15 @@ textarea { resize: vertical; }
   position: relative;
   cursor: auto;
   touch-action: auto;
+  /* KEY FIX: constrain height to deck, scroll internally — never cover action buttons */
+  max-height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(33, 27, 23, .18) transparent;
+  /* Fade hint at bottom to signal more content below */
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 32px), transparent 100%);
+  mask-image: linear-gradient(to bottom, black calc(100% - 32px), transparent 100%);
 }
 
 /* ─── Card internals ─────────────────────────────────────────────────────── */
