@@ -8,11 +8,9 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
-  "dependencies": {
-    "@vitejs/plugin-react": "^4.3.2",
-    "vite": "^5.4.8"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "vite": "^5.4.8",
     "vercel": "^37.6.1"
   }
 }
