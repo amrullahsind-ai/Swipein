@@ -462,13 +462,14 @@ textarea { resize: vertical; }
 }
 
 .card {
-  width: min(320px, 86%);
-  min-height: 200px;       /* reduced — avoids forcing overflow on short decks */
+  width: min(300px, 88%);
+  min-height: 140px;
+  max-height: calc(100% - 4px);  /* never taller than deck */
   background: var(--card);
   border: 1px solid rgba(234, 223, 212, .98);
-  border-radius: 30px;
-  box-shadow: 0 24px 56px rgba(35, 26, 19, .20);
-  padding: 24px;
+  border-radius: 26px;
+  box-shadow: 0 20px 48px rgba(35, 26, 19, .18);
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -476,7 +477,9 @@ textarea { resize: vertical; }
   user-select: none;
   cursor: grab;
   position: absolute;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;    /* hide scrollbar on scale card */
 }
 .static-card {
   position: relative;
@@ -511,24 +514,24 @@ textarea { resize: vertical; }
 }
 
 h2 {
-  font-size: clamp(25px, 7vw, 38px);
-  line-height: 1.05;
-  letter-spacing: -.055em;
-  margin: 16px 52px 0 0;
+  font-size: clamp(15px, 4.2vw, 22px);  /* smaller — long questions won't overflow */
+  line-height: 1.15;
+  letter-spacing: -.03em;
+  margin: 10px 46px 0 0;
 }
 
 .chosen {
   position: absolute;
-  top: 18px;
-  right: 18px;
-  width: 52px;
-  height: 52px;
-  border-radius: 18px;
+  top: 14px;
+  right: 14px;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
   background: var(--black);
   color: white;
   display: grid;
   place-items: center;
-  font-size: 24px;
+  font-size: 19px;
   font-weight: 900;
 }
 
